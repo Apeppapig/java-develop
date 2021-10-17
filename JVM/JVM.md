@@ -163,3 +163,194 @@ finish！
 
 证明并没有加载自定义的Integer类。
 
+
+
+# 挖坑！！！
+
+
+
+**以下过程来自京东实习生一面**
+
+**面试官**：如何修改一个class文件？
+
+
+
+**我**（第一反应）：动态代理。balabala....
+
+
+
+**面试官**：不是，是这样的一个场景，假如你有一个项目用到了spring框架，现在你发现了spring框架的一个某个jar包中有一个class文件有bug，如何对这个文件进行修改？
+
+
+
+**我**：#$%#@&%...最后说着说着就讲到了双亲委派模型。（第一次被问到这样子的问题，甚至没听懂面试官说什么...）
+
+
+
+**面试官**（似乎知道我听不懂问题了，换个说法）：就是现在你使用的jar包中有一个类，你项目中也有一个同样的类，即自己的项目中某个类与使用到的类同包同名，即全类名相同，JVM先加载哪一个？
+
+
+
+**我**：先加载jar包中的。因为**<font color="red">开发项目的时候添加jar包，是因为，项目依赖于jar包，只有添加了jar依赖，项目才能开发，所以加载Jar包当中的。</font>**（这个观点似乎没什么毛病...）
+
+
+
+**面试官**：那自己项目中的那个类岂不是没有用了？
+
+
+
+..........
+
+
+
+最后由于面试官网络的麦克风问题，我听不清楚他的问题描述，向他反映几次后，面试官就没有耐心了（maybe以为我不会，在找借口说听不清，虽然我是真的不会，但也是真的听不清。问题也是我听了一个大概，在网上搜搜了一下，才搞清楚，面试官问什么。），然后就挂啦！~~~~
+
+
+
+最终的问题就是：**<font color="red">你使用的jar包中有一个类，你项目中也有一个同样的类，即自己的项目中某个类与使用到的类同包同名，即全类名相同，JVM先加载哪一个</font>？**
+
+
+
+从上面的Integer例子好像可以得出一个结论：<font color="red">JVM优先加载jar包中的类，由于项目依赖jar包，所以会优先加载jar包当中的类。</font>在解决这个问题之前，我也一直是这么认为的。但是上面问题的答案是先加载自己项目中的类。
+
+
+
+<font color="#0099ff" size=5>**事实上，JVM先加载哪一个类是跟jar包所处的位置有关!**</font>
+
+
+
+为此，我创建了一个jar包和一个项目。
+
+jar包中有一个Test.class文件，内容如下：
+
+```java
+package test;
+
+public class Test{
+    static{
+        System.out.println("jar包当中的Test");
+    }
+}
+```
+
+
+
+项目当中的内容如下：
+
+![](../picture/JVM/Test1.png)
+
+项目中添加上述的jar包，同时创建了了一个test包，test包下有一个Test类，内容如下：
+
+```java
+package test;
+
+public class Test{
+    static{
+        System.out.println("项目中的Test");
+    }
+}
+```
+
+
+
+运行项目，得出如下结果：
+
+```java
+项目中的Test
+```
+
+
+
+为什么这一次又能覆盖掉jar包当中的类？Integer类的例子却不能？
+
+
+
+答案在于自己能不能正确理解双亲委派这个模型。
+
+
+
+我在csdn上面搜了很久，都得不到满意的结果，因为找到的全都是copy别人的:imp:(能不要那么厚脸皮吗？)但是还是能找到一个有用的线索的。我搜到的线索如下：
+
+```java
+classes
+lib
+
+项目打包后会得到上面两个项目，classes的加载优先级比lib高。
+```
+
+好吧，好像讲了跟没讲一样。为什么高却不说。
+
+
+
+但是，里面说到了<font color="red">**优先级的概念**</font>，根据这个提示，我又重新看了一遍双亲委派模型。这次，让我找到了答案！！！
+
+
+
+Application ClassLoader：负责加载项目中的类
+
+Ext ClassLoader：负责加载$JAVA_HOME/lib/ext目录下的类
+
+Bootstrap ClassLoader：负责加载rt.jar
+
+
+
+根据这三个类加载器的职责，我可以知道这几点信息：
+
+1. 在Test例子中，我们没有实现自定义类加载器，所以，默认为Application ClassLoader加载。
+2. Test例子跟Integer例子的不同之处在于：Test由Application ClassLoader加载，Integer类由Bootstrap ClassLoader加载。
+3. Application ClassLoader优先级比Bootstrap ClassLoader低。
+
+
+
+根据上面，提出一个猜想：<font color="#0099ff">**Test能覆盖而Integer类不能覆盖的原因在于类加载器的问题**</font>
+
+详细如下：
+
+1. Integer例子中，加载Integer类时，Application ClassLoader不能先加载，需要向上传递加载需求，到达Bootstrap ClassLoader的时候，发现该类在他的加载职责范围之内，所以由Bootstrap ClassLoader加载Integer，其他类加载器<font color="red">不需要也不能</font>加载java.lang.Integer，因为<font color="red">一个全类名只能确定一个类。</font>在加载请求再次回到Application ClassLoader的时候，就不能加载项目中那个空白的Integer类的，该类处在Application ClassLoader的职责范围。
+2. Test例子当中，无论是jar包当中的Test类还是项目当中的Test类，都由Application ClassLoader加载。加载哪个？根据编程经验，在寻找类的时候应该是用循环遍历扫描，classes与lib由于字典树排序，classes排在前面，所以项目当中的加载自定义的之后就停止了扫描，因为已经找到符合的类了。
+3. 如果Test.jar放到了Bootstrap ClassLoader或者Ext ClassLoader的加载职责范围内，就不会被项目当中的Test覆盖掉。
+
+
+
+根据猜想，用下面的例子进行测试，我把test.jar放到了$JAVA_HOME/lib/ext目录下，这里不放到Bootstrap的加载范围是因为这个jar包不会被Bootstrap ClassLoader识别，加了也没用。
+
+再进行下面的测试：
+
+![](../picture/JVM/Test2.png)
+
+src/test/Test.java
+
+```java
+package test;
+
+public class Test{
+    static{
+        static{
+            System.out.println("项目中的jar包");
+        }
+    }
+}
+```
+
+src/Main.java
+
+```java
+public class Main{
+    public static void main(String args[]){
+        System.out.println(Integer.class.getClassLoader());
+        System.out.println(Test.class.getClassLoader());
+        new Test();
+    }
+}
+```
+
+输出解析：
+
+```java
+第一行输出null是因为Bootstrap ClassLoader用c++写的，所以显示不出来
+
+第二第三行的输出是因为把Test.jar放到了ext目录下，所以由Ext ClassLoader加载，同时，也验证了想法，把jar包放到了ext目录下时就不会被覆盖了。
+```
+
+至此，我才真正理解了双亲委派模型的精妙之处，最后得到的答案也是：<font color="#0099ff">**能不能被覆盖，要看是被哪个加载器加载的.**</font>
+
